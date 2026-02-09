@@ -175,7 +175,23 @@ salt '*' cmd.run '/opt/scripts/monitor_salt.sh compare --json --api-url https://
 
 ### 테스트용 API 서버 실행
 
-프로젝트에 포함된 테스트 서버로 로컬 테스트:
+#### 방법 1: Docker로 실행 (권장)
+
+```bash
+# 빠른 시작 스크립트 사용
+./start_api_server.sh
+
+# 또는 docker-compose 직접 실행
+docker compose up -d --build
+
+# 로그 확인
+docker compose logs -f
+
+# 종료
+docker compose down
+```
+
+#### 방법 2: Python 직접 실행
 
 ```bash
 # API 서버 시작
@@ -183,6 +199,21 @@ python3 test_api_server.py 8080
 
 # 다른 터미널에서 테스트
 ./monitor_salt.sh compare --json --api-url http://localhost:8080/
+```
+
+#### 원격 서버에 배포
+
+```bash
+# 1. 파일 복사
+scp -r process_monitor/ user@remote-server:/opt/
+
+# 2. 원격 서버에서 실행
+ssh user@remote-server
+cd /opt/process_monitor
+./start_api_server.sh
+
+# 3. 테스트
+./monitor_salt.sh compare --json --api-url http://remote-server:8080/
 ```
 
 ### API 요청 형식

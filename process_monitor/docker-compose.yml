@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  monitor-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: monitor-api-server
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Seoul
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - monitor-network
+
+networks:
+  monitor-network:
+    driver: bridge
