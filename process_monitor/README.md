@@ -161,9 +161,83 @@ salt --batch-size 25% '*' cmd.run '/opt/scripts/monitor_salt.sh compare --json'
 chmod +x monitor_salt.sh
 ```
 
-## 🔄 다음 단계: HTTP API 연동
+## 🌐 HTTP API 연동
 
-HTTP API 서버로 결과를 자동 전송하는 기능이 곧 추가될 예정입니다.
+### API로 결과 자동 전송
+
+```bash
+# 단일 서버에서 API로 전송
+./monitor_salt.sh compare --json --api-url https://api.example.com/monitor
+
+# Salt로 대량 실행 + API 전송
+salt '*' cmd.run '/opt/scripts/monitor_salt.sh compare --json --api-url https://api.company.com/monitor'
+```
+
+### 테스트용 API 서버 실행
+
+프로젝트에 포함된 테스트 서버로 로컬 테스트:
+
+```bash
+# API 서버 시작
+python3 test_api_server.py 8080
+
+# 다른 터미널에서 테스트
+./monitor_salt.sh compare --json --api-url http://localhost:8080/
+```
+
+### API 요청 형식
+
+**Endpoint**: `POST {API_URL}`
+
+**Headers**:
+```
+Content-Type: application/json
+```
+
+**Body**:
+```json
+{
+  "hostname": "server01",
+  "timestamp": "2026-02-09 15:30:00",
+  "status": "failure",
+  "has_issues": true,
+  "snapshot_time": "2026-02-09 14:00:00",
+  "services": {
+    "stopped": ["nginx.service"],
+    "new": []
+  },
+  "processes": {
+    "stopped": ["nginx"]
+  },
+  "ports": {
+    "missing": [":80"]
+  }
+}
+```
+
+### API 서버 구현 예시
+
+```python
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+@app.route('/monitor', methods=['POST'])
+def receive_monitor_result():
+    data = request.json
+    
+    # 데이터베이스에 저장
+    # save_to_database(data)
+    
+    # Slack/Discord 알림
+    if data.get('has_issues'):
+        send_alert(f"⚠️ {data['hostname']} has issues!")
+    
+    return jsonify({"status": "success"}), 200
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
+```
 
 ---
 **참고**: 커널 프로세스(kworker, kswapd 등)는 자동으로 비교에서 제외됩니다.

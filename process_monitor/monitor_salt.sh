@@ -24,6 +24,7 @@ NC='\033[0m' # No Color
 
 # JSON 출력 모드
 JSON_MODE=false
+API_URL=""
 
 # 비교에서 제외할 커널 프로세스 패턴
 EXCLUDE_PROCS="kworker|kswapd|ksoftirqd|migration|rcu_|watchdog|cpuhp|idle_inject|irq/|scsi_|md_|edac-|devfreq_"
@@ -42,7 +43,7 @@ json_escape() {
 
 # 도움말 출력
 show_help() {
-    echo "사용법: $0 {snapshot|compare|status} [--json]"
+    echo "사용법: $0 {snapshot|compare|status} [--json] [--api-url URL]"
     echo ""
     echo "명령어:"
     echo "  snapshot  - 현재 프로세스 상태를 스냅샷으로 저장 (재부팅 전 실행)"
@@ -50,12 +51,16 @@ show_help() {
     echo "  status    - 현재 스냅샷 정보 확인"
     echo ""
     echo "옵션:"
-    echo "  --json    - JSON 형식으로 결과 출력 (Salt 환경용)"
+    echo "  --json         - JSON 형식으로 결과 출력 (Salt 환경용)"
+    echo "  --api-url URL  - 결과를 HTTP API로 전송 (JSON 모드와 함께 사용)"
     echo ""
     echo "스냅샷 저장 위치: $SNAPSHOT_DIR"
     echo ""
     echo "Salt 사용 예시:"
     echo "  salt '*' cmd.run '/path/to/monitor_salt.sh compare --json' --out=json > results.json"
+    echo ""
+    echo "API 전송 예시:"
+    echo "  ./monitor_salt.sh compare --json --api-url https://api.example.com/monitor"
 }
 
 # systemd 서비스 목록 수집
@@ -158,6 +163,34 @@ EOF
     echo -e "       $0 compare"
 }
 
+# API로 결과 전송
+send_to_api() {
+    local json_data="$1"
+    local api_url="$2"
+    
+    if [[ -z "$api_url" ]]; then
+        return 0
+    fi
+    
+    local response
+    local http_code
+    
+    # curl로 POST 요청
+    response=$(curl -s -w "\n%{http_code}" -X POST "$api_url" \
+        -H "Content-Type: application/json" \
+        -d "$json_data" 2>&1)
+    
+    http_code=$(echo "$response" | tail -n1)
+    
+    if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+        echo "[API] 결과 전송 성공: $api_url (HTTP $http_code)" >&2
+        return 0
+    else
+        echo "[API] 결과 전송 실패: $api_url (HTTP $http_code)" >&2
+        return 1
+    fi
+}
+
 # JSON 배열 생성 함수
 array_to_json() {
     local items="$1"
@@ -219,8 +252,9 @@ do_compare_json() {
         has_issue=1
     fi
 
-    # JSON 출력
-    cat << EOF
+    # JSON 생성
+    local json_output
+    json_output=$(cat << EOF
 {
   "hostname": "$HOSTNAME",
   "timestamp": "$(date '+%Y-%m-%d %H:%M:%S')",
@@ -239,6 +273,15 @@ do_compare_json() {
   }
 }
 EOF
+)
+
+    # JSON 출력
+    echo "$json_output"
+    
+    # API로 전송 (옵션)
+    if [[ -n "$API_URL" ]]; then
+        send_to_api "$json_output" "$API_URL"
+    fi
 
     rm -f "$current_services" "$current_procs" "$current_ports"
     
@@ -398,14 +441,32 @@ do_status() {
     fi
 }
 
-# 메인 로직
+# 메인 로직 - 파라미터 파싱
 COMMAND="${1:-}"
-if [[ "${2:-}" == "--json" ]] || [[ "${1:-}" == "--json" && -n "${2:-}" ]]; then
-    JSON_MODE=true
-    if [[ "$COMMAND" == "--json" ]]; then
-        COMMAND="${2:-}"
-    fi
-fi
+shift || true
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --json)
+            JSON_MODE=true
+            shift
+            ;;
+        --api-url)
+            API_URL="${2:-}"
+            if [[ -z "$API_URL" ]]; then
+                echo "Error: --api-url requires a URL argument" >&2
+                exit 1
+            fi
+            shift 2
+            ;;
+        *)
+            if [[ -z "$COMMAND" ]]; then
+                COMMAND="$1"
+            fi
+            shift
+            ;;
+    esac
+done
 
 case "$COMMAND" in
     snapshot)
