@@ -12,12 +12,35 @@ monitor_salt.sh의 --api-url 옵션 테스트용
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
 import sys
+import os
 from datetime import datetime
+from pathlib import Path
 
-class MonitorAPIHandler(BaseHTTPRequestHandler):
+clas# 로그 디렉토리 설정
+    LOG_DIR = os.getenv('MONITOR_LOG_DIR', '/var/log/monitor')
     
     def log_message(self, format, *args):
         """로그 메시지를 예쁘게 출력"""
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        sys.stderr.write(f"[{timestamp}] {format % args}\n")
+    
+    def save_result_to_file(self, data):
+        """결과를 JSON 파일로 저장"""
+        try:
+            Path(self.LOG_DIR).mkdir(parents=True, exist_ok=True)
+            
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            hostname = data.get('hostname', 'unknown')
+            filename = f"{self.LOG_DIR}/{hostname}_{timestamp}.json"
+            
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            print(f"💾 결과 저장: {filename}")
+            return filename
+        except Exception as e:
+            print(f"⚠️  파일 저장 실패: {e}")
+            return None
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         sys.stderr.write(f"[{timestamp}] {format % args}\n")
     
@@ -51,12 +74,16 @@ class MonitorAPIHandler(BaseHTTPRequestHandler):
                 for svc in stopped_services:
                     print(f"   - {svc}")
             
-            # 새로 시작된 서비스
-            new_services = data.get('services', {}).get('new', [])
-            if new_services:
-                print(f"\n➕ 새로 시작된 서비스 ({len(new_services)}개):")
-                for svc in new_services:
-                    print(f"   - {svc}")
+            # 파일로 저장
+            saved_file = self.save_result_to_file(data)
+            
+            # 성공 응답
+            response = {
+                "status": "success",
+                "message": "모니터링 결과가 성공적으로 수신되었습니다",
+                "received_at": datetime.now().isoformat(),
+                "hostname": data.get('hostname'),
+                "saved_to": saved_file
             
             # 중지된 프로세스
             stopped_procs = data.get('processes', {}).get('stopped', [])

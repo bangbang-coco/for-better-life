@@ -7,10 +7,12 @@ services:
       dockerfile: Dockerfile
     container_name: monitor-api-server
     ports:
-      - "8080:8080"
+      - "0.0.0.0:8080:8080"  # 모든 네트워크 인터페이스에서 접근 가능
     restart: unless-stopped
     environment:
       - TZ=Asia/Seoul
+    volumes:
+      - ./logs:/var/log/monitor  # 결과를 파일로도 저장
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
       interval: 30s
