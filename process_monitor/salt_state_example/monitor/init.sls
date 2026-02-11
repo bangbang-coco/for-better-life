@@ -1,9 +1,9 @@
-# Process Monitor Script Deployment and Configuration
+# Process Monitor 스크립트 배포 및 설정
 #
-# Usage:
+# 사용법:
 #   salt '*' state.apply monitor
 
-# Create script directory
+# 스크립트 디렉토리 생성
 monitor_script_dir:
   file.directory:
     - name: /opt/scripts
@@ -12,7 +12,7 @@ monitor_script_dir:
     - mode: 755
     - makedirs: True
 
-# Deploy monitor_salt.sh
+# monitor_salt.sh 배포
 monitor_salt_script:
   file.managed:
     - name: /opt/scripts/monitor_salt.sh
@@ -24,7 +24,7 @@ monitor_salt_script:
     - require:
       - file: monitor_script_dir
 
-# Set Salt Master information as environment variable
+# Salt Master 정보를 환경변수로 설정
 monitor_config:
   file.managed:
     - name: /etc/profile.d/monitor_config.sh
@@ -32,11 +32,11 @@ monitor_config:
     - group: root
     - mode: 644
     - contents: |
-        # Process Monitor Configuration
+        # Process Monitor 설정
         export MONITOR_API_URL="http://{{ grains['master'] }}:8080/"
         export SALT_MASTER_HOST="{{ grains['master'] }}"
 
-# Create snapshot directory (optional)
+# 스냅샷 디렉토리 생성 (선택사항)
 monitor_snapshot_dir:
   file.directory:
     - name: /var/tmp/process_snapshot
