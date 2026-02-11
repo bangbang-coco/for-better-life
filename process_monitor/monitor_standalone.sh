@@ -1,62 +1,62 @@
 #!/bin/bash
 #
-# 서버 재부팅 전후 프로세스 모니터링 스크립트
-# 사용법:
-#   재부팅 전: ./process_monitor.sh snapshot
-#   재부팅 후: ./process_monitor.sh compare
+# Server Process Monitoring Script (Before/After Reboot)
+# Usage:
+#   Before reboot: ./process_monitor.sh snapshot
+#   After reboot: ./process_monitor.sh compare
 #
 
 set -euo pipefail
 
-# 설정
+# Configuration
 SNAPSHOT_DIR="/var/tmp/process_snapshot"
 HOSTNAME=$(hostname)
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-# 색상 정의
+# Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# 비교에서 제외할 커널 프로세스 패턴
+# Kernel process patterns to exclude from comparison
 EXCLUDE_PROCS="kworker|kswapd|ksoftirqd|migration|rcu_|watchdog|cpuhp|idle_inject|irq/|scsi_|md_|edac-|devfreq_"
 
-# 구분선 (가로 80자)
+# Divider lines (80 characters)
 LINE="════════════════════════════════════════════════════════════════════════════════"
 THIN_LINE="────────────────────────────────────────────────────────────────────────────────"
 
-# 스냅샷 디렉토리 생성
+# Create snapshot directory
 mkdir -p "$SNAPSHOT_DIR"
 
-# 도움말 출력
+# Show help
 show_help() {
-    echo "사용법: $0 {snapshot|compare|status}"
+    echo "Usage: $0 {snapshot|compare|status}"
     echo ""
-    echo "명령어:"
-    echo "  snapshot  - 현재 프로세스 상태를 스냅샷으로 저장 (재부팅 전 실행)"
-    echo "  compare   - 스냅샷과 현재 상태 비교 (재부팅 후 실행)"
-    echo "  status    - 현재 스냅샷 정보 확인"
+    echo "Commands:"
+    echo "  snapshot  - Save current process state as snapshot (run before reboot)"
+    echo "  compare   - Compare snapshot with current state (run after reboot)"
+    echo "  status    - Check current snapshot information"
     echo ""
-    echo "스냅샷 저장 위치: $SNAPSHOT_DIR"
+    echo "Snapshot storage location: $SNAPSHOT_DIR"
 }
 
-# systemd 서비스 목록 수집
+# Collect systemd service list
 get_systemd_services() {
     systemctl list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | \
         awk '{print $1}' | sort
 }
 
-# 활성화된(enabled) 서비스 목록 수집
+# Collect enabled service list
 get_enabled_services() {
     systemctl list-unit-files --type=service --state=enabled --no-pager --no-legend 2>/dev/null | \
         awk '{print $1}' | sort
 }
 
-# 실행 중인 프로세스 목록 수집 (중요 프로세스만)
+# Collect running process list (important processes only)
 get_running_processes() {
-    # 커널 스레드 및 커널 워커 프로세스 제외
+    # Exclude kernel threads and kernel worker processes
     ps -eo comm,user --no-headers 2>/dev/null | \
         grep -v '^\[' | \
         awk '{print $1}' | \
@@ -64,129 +64,128 @@ get_running_processes() {
         sort -u
 }
 
-# 상세 프로세스 정보 수집
+# Collect detailed process information
 get_process_details() {
     ps -eo pid,ppid,user,comm,args --no-headers 2>/dev/null | \
         grep -v '^\s*[0-9]*\s*[0-9]*\s*\S*\s*\[' | \
         sort -k4
 }
 
-# 리스닝 포트 수집
+# Collect listening ports
 get_listening_ports() {
     if command -v ss &> /dev/null; then
         ss -tulnp 2>/dev/null | tail -n +2 | sort
     elif command -v netstat &> /dev/null; then
         netstat -tulnp 2>/dev/null | tail -n +2 | sort
     else
-        echo "포트 확인 도구 없음"
+        echo "Port check tool unavailable"
     fi
 }
 
-# 스냅샷 저장
+# Save snapshot
 do_snapshot() {
-    echo -e "${BLUE}[INFO]${NC} 프로세스 스냅샷 생성 중... (호스트: $HOSTNAME)"
+    echo -e "${BLUE}[INFO]${NC} Creating process snapshot... (Host: $HOSTNAME)"
 
-    # 기존 스냅샷 백업
+    # Backup existing snapshot
     if [[ -f "$SNAPSHOT_DIR/services_running.txt" ]]; then
-        echo -e "${YELLOW}[WARN]${NC} 기존 스냅샷이 있습니다. 백업 중..."
+        echo -e "${YELLOW}[WARN]${NC} Existing snapshot found. Backing up..."
         backup_dir="$SNAPSHOT_DIR/backup_$TIMESTAMP"
         mkdir -p "$backup_dir"
         mv "$SNAPSHOT_DIR"/*.txt "$backup_dir/" 2>/dev/null || true
     fi
 
-    # 1. 실행 중인 systemd 서비스
-    echo -e "${BLUE}[INFO]${NC} 실행 중인 systemd 서비스 수집..."
+    # 1. Running systemd services
+    echo -e "${BLUE}[INFO]${NC} Collecting running systemd services..."
     get_systemd_services > "$SNAPSHOT_DIR/services_running.txt"
     running_count=$(wc -l < "$SNAPSHOT_DIR/services_running.txt")
-    echo -e "       └─ $running_count 개 서비스 저장됨"
+    echo -e "       └─ $running_count services saved"
 
-    # 2. 활성화된 서비스 (부팅 시 자동 시작)
-    echo -e "${BLUE}[INFO]${NC} 활성화된(enabled) 서비스 수집..."
+    # 2. Enabled services (auto-start on boot)
+    echo -e "${BLUE}[INFO]${NC} Collecting enabled services..."
     get_enabled_services > "$SNAPSHOT_DIR/services_enabled.txt"
     enabled_count=$(wc -l < "$SNAPSHOT_DIR/services_enabled.txt")
-    echo -e "       └─ $enabled_count 개 서비스 저장됨"
+    echo -e "       └─ $enabled_count services saved"
 
-    # 3. 실행 중인 프로세스 (이름만)
-    echo -e "${BLUE}[INFO]${NC} 실행 중인 프로세스 목록 수집..."
+    # 3. Running processes (names only)
+    echo -e "${BLUE}[INFO]${NC} Collecting running process list..."
     get_running_processes > "$SNAPSHOT_DIR/processes.txt"
     proc_count=$(wc -l < "$SNAPSHOT_DIR/processes.txt")
-    echo -e "       └─ $proc_count 개 프로세스 저장됨"
+    echo -e "       └─ $proc_count processes saved"
 
-    # 4. 상세 프로세스 정보
-    echo -e "${BLUE}[INFO]${NC} 상세 프로세스 정보 수집..."
+    # 4. Detailed process information
+    echo -e "${BLUE}[INFO]${NC} Collecting detailed process information..."
     get_process_details > "$SNAPSHOT_DIR/processes_detail.txt"
 
-    # 5. 리스닝 포트
-    echo -e "${BLUE}[INFO]${NC} 리스닝 포트 수집..."
+    # 5. Listening ports
+    echo -e "${BLUE}[INFO]${NC} Collecting listening ports..."
     get_listening_ports > "$SNAPSHOT_DIR/ports.txt"
     port_count=$(grep -c "LISTEN\|tcp\|udp" "$SNAPSHOT_DIR/ports.txt" 2>/dev/null || echo "0")
-    echo -e "       └─ $port_count 개 포트 저장됨"
+    echo -e "       └─ $port_count ports saved"
 
-    # 메타데이터 저장
+    # Save metadata
     cat > "$SNAPSHOT_DIR/metadata.txt" << EOF
-호스트명: $HOSTNAME
-스냅샷 시간: $(date '+%Y-%m-%d %H:%M:%S')
-커널 버전: $(uname -r)
-업타임: $(uptime -p 2>/dev/null || uptime)
+Hostname: $HOSTNAME
+Snapshot Time: $(date '+%Y-%m-%d %H:%M:%S')
+Kernel Version: $(uname -r)
+Uptime: $(uptime -p 2>/dev/null || uptime)
 EOF
 
     echo ""
-    echo -e "${GREEN}[SUCCESS]${NC} 스냅샷 저장 완료!"
-    echo -e "          저장 위치: $SNAPSHOT_DIR"
+    echo -e "${GREEN}[SUCCESS]${NC} Snapshot saved successfully!"
+    echo -e "          Saved at: $SNAPSHOT_DIR"
     echo ""
-    echo -e "${YELLOW}[NOTE]${NC} 재부팅 후 다음 명령어로 비교하세요:"
+    echo -e "${YELLOW}[NOTE]${NC} After reboot, compare with this command:"
     echo -e "       $0 compare"
 }
 
-# 스냅샷과 현재 상태 비교
+# Compare snapshot with current state
 do_compare() {
     if [[ ! -f "$SNAPSHOT_DIR/services_running.txt" ]]; then
-        echo -e "${RED}[ERROR]${NC} 스냅샷이 없습니다. 먼저 'snapshot' 명령을 실행하세요."
+        echo -e "${RED}[ERROR]${NC} No snapshot found. Please run 'snapshot' command first."
         exit 1
     fi
 
     echo -e "${BLUE}${LINE}${NC}"
-    echo -e "${BLUE}  서버 재부팅 후 프로세스 비교 리포트${NC}"
-    echo -e "${BLUE}  호스트: $HOSTNAME${NC}"
-    echo -e "${BLUE}  비교 시간: $(date '+%Y-%m-%d %H:%M:%S')${NC}"
+    echo -e "${BLUE}  Process Comparison Report After Server Reboot${NC}"
+    echo -e "${BLUE}  Host: $HOSTNAME${NC}"
+    echo -e "${BLUE}  Comparison Time: $(date '+%Y-%m-%d %H:%M:%S')${NC}"
     echo -e "${BLUE}${LINE}${NC}"
     echo ""
 
-    # 스냅샷 메타데이터 출력
+    # Output snapshot metadata
     if [[ -f "$SNAPSHOT_DIR/metadata.txt" ]]; then
-        echo -e "${YELLOW}[스냅샷 정보]${NC}"
+        echo -e "${YELLOW}[Snapshot Information]${NC}"
         cat "$SNAPSHOT_DIR/metadata.txt"
         echo ""
     fi
 
     local has_issue=0
 
-    # 1. systemd 서비스 비교
-    echo -e "${YELLOW}[1] Systemd 서비스 비교${NC}"
+    # 1. Compare systemd services
+    echo -e "${YELLOW}[1] Systemd Service Comparison${NC}"
     echo -e "${THIN_LINE}"
 
     current_services=$(mktemp)
     get_systemd_services > "$current_services"
 
-    # 중지된 서비스 찾기
+    # Find stopped services
     stopped_services=$(comm -23 "$SNAPSHOT_DIR/services_running.txt" "$current_services")
     if [[ -n "$stopped_services" ]]; then
-        echo -e "${RED}[!] 실행되지 않는 서비스:${NC}"
+        echo -e "${RED}[!] Services not running:${NC}"
         while IFS= read -r svc; do
-#            status=$(systemctl is-active "$svc" 2>/dev/null || echo "unknown")
             status=$(systemctl is-active "$svc" 2>/dev/null || true)
             [[ -z "$status" ]] && status="unknown"
-            echo -e "    ${RED}✗${NC} $svc (상태: $status)"
+            echo -e "    ${RED}✗${NC} $svc (status: $status)"
         done <<< "$stopped_services"
         has_issue=1
     else
-        echo -e "${GREEN}[✓] 모든 서비스가 정상 실행 중${NC}"
+        echo -e "${GREEN}[✓] All services running normally${NC}"
     fi
 
-    # 새로 시작된 서비스
+    # Newly started services
     new_services=$(comm -13 "$SNAPSHOT_DIR/services_running.txt" "$current_services")
     if [[ -n "$new_services" ]]; then
-        echo -e "${BLUE}[i] 새로 시작된 서비스:${NC}"
+        echo -e "${BLUE}[i] Newly started services:${NC}"
         while IFS= read -r svc; do
             echo -e "    ${BLUE}+${NC} $svc"
         done <<< "$new_services"
@@ -195,86 +194,86 @@ do_compare() {
     rm -f "$current_services"
     echo ""
 
-    # 2. 프로세스 비교
-    echo -e "${YELLOW}[2] 프로세스 비교${NC}"
+    # 2. Compare processes
+    echo -e "${YELLOW}[2] Process Comparison${NC}"
     echo -e "${THIN_LINE}"
 
     current_procs=$(mktemp)
     get_running_processes > "$current_procs"
 
-    # 중지된 프로세스 찾기 (커널 프로세스 제외)
+    # Find stopped processes (exclude kernel processes)
     stopped_procs=$(comm -23 "$SNAPSHOT_DIR/processes.txt" "$current_procs" | grep -Ev "^($EXCLUDE_PROCS)" || true)
     if [[ -n "$stopped_procs" ]]; then
-        echo -e "${RED}[!] 실행되지 않는 프로세스:${NC}"
+        echo -e "${RED}[!] Processes not running:${NC}"
         while IFS= read -r proc; do
             echo -e "    ${RED}✗${NC} $proc"
         done <<< "$stopped_procs"
         has_issue=1
     else
-        echo -e "${GREEN}[✓] 주요 프로세스 모두 실행 중${NC}"
+        echo -e "${GREEN}[✓] All major processes running${NC}"
     fi
 
     rm -f "$current_procs"
     echo ""
 
-    # 3. 포트 비교
-    echo -e "${YELLOW}[3] 리스닝 포트 비교${NC}"
+    # 3. Compare ports
+    echo -e "${YELLOW}[3] Listening Port Comparison${NC}"
     echo -e "${THIN_LINE}"
 
     if [[ -f "$SNAPSHOT_DIR/ports.txt" ]]; then
         current_ports=$(mktemp)
         get_listening_ports > "$current_ports"
 
-        # 간단한 포트 비교 (포트 번호만 추출)
+        # Simple port comparison (extract port numbers only)
         old_ports=$(grep -oE ':[0-9]+' "$SNAPSHOT_DIR/ports.txt" 2>/dev/null | sort -u || true)
         new_ports=$(grep -oE ':[0-9]+' "$current_ports" 2>/dev/null | sort -u || true)
 
         missing_ports=$(comm -23 <(echo "$old_ports") <(echo "$new_ports") 2>/dev/null || true)
         if [[ -n "$missing_ports" ]]; then
-            echo -e "${RED}[!] 리스닝하지 않는 포트:${NC}"
+            echo -e "${RED}[!] Ports not listening:${NC}"
             echo "$missing_ports" | while read -r port; do
                 echo -e "    ${RED}✗${NC} $port"
             done
             has_issue=1
         else
-            echo -e "${GREEN}[✓] 모든 포트 정상 리스닝 중${NC}"
+            echo -e "${GREEN}[✓] All ports listening normally${NC}"
         fi
 
         rm -f "$current_ports"
     fi
     echo ""
 
-    # 결과 요약
+    # Result summary
     echo -e "${YELLOW}${LINE}${NC}"
     if [[ $has_issue -eq 1 ]]; then
-        echo -e "${RED}[결과] 일부 서비스/프로세스가 실행되지 않고 있습니다!${NC}"
-        echo -e "${YELLOW}       위 목록을 확인하고 필요시 수동으로 시작하세요.${NC}"
+        echo -e "${RED}[Result] Some services/processes are not running!${NC}"
+        echo -e "${YELLOW}       Please check the list above and manually start if needed.${NC}"
         exit 1
     else
-        echo -e "${GREEN}[결과] 모든 서비스와 프로세스가 정상입니다!${NC}"
+        echo -e "${GREEN}[Result] All services and processes are normal!${NC}"
         exit 0
     fi
 }
 
-# 스냅샷 상태 확인
+# Check snapshot status
 do_status() {
-    echo -e "${BLUE}[스냅샷 상태]${NC}"
+    echo -e "${BLUE}[Snapshot Status]${NC}"
     echo -e "${THIN_LINE}"
 
     if [[ -d "$SNAPSHOT_DIR" && -f "$SNAPSHOT_DIR/metadata.txt" ]]; then
-        echo -e "${GREEN}스냅샷 존재함${NC}"
+        echo -e "${GREEN}Snapshot exists${NC}"
         echo ""
         cat "$SNAPSHOT_DIR/metadata.txt"
         echo ""
-        echo "저장된 파일:"
-        ls -la "$SNAPSHOT_DIR"/*.txt 2>/dev/null || echo "  (없음)"
+        echo "Saved files:"
+        ls -la "$SNAPSHOT_DIR"/*.txt 2>/dev/null || echo "  (none)"
     else
-        echo -e "${YELLOW}스냅샷 없음${NC}"
-        echo "먼저 '$0 snapshot' 명령을 실행하세요."
+        echo -e "${YELLOW}No snapshot${NC}"
+        echo "Please run '$0 snapshot' command first."
     fi
 }
 
-# 메인 로직
+# Main logic
 case "${1:-}" in
     snapshot)
         do_snapshot

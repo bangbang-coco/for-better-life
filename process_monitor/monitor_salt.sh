@@ -1,81 +1,81 @@
 #!/bin/bash
 #
-# Salt 환경용 서버 재부팅 전후 프로세스 모니터링 스크립트
-# JSON 출력 지원으로 Salt master에서 결과 수집 용이
+# Server Process Monitoring Script for Salt Environment
+# JSON output support for easy result collection from Salt master
 #
-# 사용법:
-#   재부팅 전: ./monitor_salt.sh snapshot
-#   재부팅 후: ./monitor_salt.sh compare [--json]
+# Usage:
+#   Before reboot: ./monitor_salt.sh snapshot
+#   After reboot: ./monitor_salt.sh compare [--json] [--api-url URL]
 #
 
 set -euo pipefail
 
-# 설정
+# Configuration
 SNAPSHOT_DIR="/var/tmp/process_snapshot"
 HOSTNAME=$(hostname)
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-# 색상 정의
+# Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# JSON 출력 모드
+# JSON output mode
 JSON_MODE=false
 API_URL=""
 
-# 비교에서 제외할 커널 프로세스 패턴
+# Kernel process patterns to exclude from comparison
 EXCLUDE_PROCS="kworker|kswapd|ksoftirqd|migration|rcu_|watchdog|cpuhp|idle_inject|irq/|scsi_|md_|edac-|devfreq_"
 
-# 구분선 (가로 80자)
+# Divider lines (80 characters)
 LINE="════════════════════════════════════════════════════════════════════════════════"
 THIN_LINE="────────────────────────────────────────────────────────────────────────────────"
 
-# 스냅샷 디렉토리 생성
+# Create snapshot directory
 mkdir -p "$SNAPSHOT_DIR"
 
-# JSON 이스케이프 함수
+# JSON escape function
 json_escape() {
     echo "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g' | sed ':a;N;$!ba;s/\n/\\n/g'
 }
 
-# 도움말 출력
+# Show help
 show_help() {
-    echo "사용법: $0 {snapshot|compare|status} [--json] [--api-url URL]"
+    echo "Usage: $0 {snapshot|compare|status} [--json] [--api-url URL]"
     echo ""
-    echo "명령어:"
-    echo "  snapshot  - 현재 프로세스 상태를 스냅샷으로 저장 (재부팅 전 실행)"
-    echo "  compare   - 스냅샷과 현재 상태 비교 (재부팅 후 실행)"
-    echo "  status    - 현재 스냅샷 정보 확인"
+    echo "Commands:"
+    echo "  snapshot  - Save current process state as snapshot (run before reboot)"
+    echo "  compare   - Compare snapshot with current state (run after reboot)"
+    echo "  status    - Check current snapshot information"
     echo ""
-    echo "옵션:"
-    echo "  --json         - JSON 형식으로 결과 출력 (Salt 환경용)"
-    echo "  --api-url URL  - 결과를 HTTP API로 전송 (JSON 모드와 함께 사용)"
+    echo "Options:"
+    echo "  --json         - Output results in JSON format (for Salt environment)"
+    echo "  --api-url URL  - Send results to HTTP API (use with JSON mode)"
     echo ""
-    echo "스냅샷 저장 위치: $SNAPSHOT_DIR"
+    echo "Snapshot storage location: $SNAPSHOT_DIR"
     echo ""
-    echo "Salt 사용 예시:"
+    echo "Salt usage example:"
     echo "  salt '*' cmd.run '/path/to/monitor_salt.sh compare --json' --out=json > results.json"
     echo ""
-    echo "API 전송 예시:"
+    echo "API transmission example:"
     echo "  ./monitor_salt.sh compare --json --api-url https://api.example.com/monitor"
 }
 
-# systemd 서비스 목록 수집
+# Collect systemd service list
 get_systemd_services() {
     systemctl list-units --type=service --state=running --no-pager --no-legend 2>/dev/null | \
         awk '{print $1}' | sort
 }
 
-# 활성화된(enabled) 서비스 목록 수집
+# Collect enabled service list
 get_enabled_services() {
     systemctl list-unit-files --type=service --state=enabled --no-pager --no-legend 2>/dev/null | \
         awk '{print $1}' | sort
 }
 
-# 실행 중인 프로세스 목록 수집 (중요 프로세스만)
+# Collect running process list (important processes only)
 get_running_processes() {
     ps -eo comm,user --no-headers 2>/dev/null | \
         grep -v '^\[' | \
@@ -84,86 +84,86 @@ get_running_processes() {
         sort -u
 }
 
-# 상세 프로세스 정보 수집
+# Collect detailed process information
 get_process_details() {
     ps -eo pid,ppid,user,comm,args --no-headers 2>/dev/null | \
         grep -v '^\s*[0-9]*\s*[0-9]*\s*\S*\s*\[' | \
         sort -k4
 }
 
-# 리스닝 포트 수집
+# Collect listening ports
 get_listening_ports() {
     if command -v ss &> /dev/null; then
         ss -tulnp 2>/dev/null | tail -n +2 | sort
     elif command -v netstat &> /dev/null; then
         netstat -tulnp 2>/dev/null | tail -n +2 | sort
     else
-        echo "포트 확인 도구 없음"
+        echo "Port check tool unavailable"
     fi
 }
 
-# 스냅샷 저장
+# Save snapshot
 do_snapshot() {
     if [[ "$JSON_MODE" == "true" ]]; then
         echo "JSON mode is not supported for snapshot command" >&2
         exit 1
     fi
 
-    echo -e "${BLUE}[INFO]${NC} 프로세스 스냅샷 생성 중... (호스트: $HOSTNAME)"
+    echo -e "${BLUE}[INFO]${NC} Creating process snapshot... (Host: $HOSTNAME)"
 
-    # 기존 스냅샷 백업
+    # Backup existing snapshot
     if [[ -f "$SNAPSHOT_DIR/services_running.txt" ]]; then
-        echo -e "${YELLOW}[WARN]${NC} 기존 스냅샷이 있습니다. 백업 중..."
+        echo -e "${YELLOW}[WARN]${NC} Existing snapshot found. Backing up..."
         backup_dir="$SNAPSHOT_DIR/backup_$TIMESTAMP"
         mkdir -p "$backup_dir"
         mv "$SNAPSHOT_DIR"/*.txt "$backup_dir/" 2>/dev/null || true
     fi
 
-    # 1. 실행 중인 systemd 서비스
-    echo -e "${BLUE}[INFO]${NC} 실행 중인 systemd 서비스 수집..."
+    # 1. Running systemd services
+    echo -e "${BLUE}[INFO]${NC} Collecting running systemd services..."
     get_systemd_services > "$SNAPSHOT_DIR/services_running.txt"
     running_count=$(wc -l < "$SNAPSHOT_DIR/services_running.txt")
-    echo -e "       └─ $running_count 개 서비스 저장됨"
+    echo -e "       └─ $running_count services saved"
 
-    # 2. 활성화된 서비스 (부팅 시 자동 시작)
-    echo -e "${BLUE}[INFO]${NC} 활성화된(enabled) 서비스 수집..."
+    # 2. Enabled services
+    echo -e "${BLUE}[INFO]${NC} Collecting enabled services..."
     get_enabled_services > "$SNAPSHOT_DIR/services_enabled.txt"
     enabled_count=$(wc -l < "$SNAPSHOT_DIR/services_enabled.txt")
-    echo -e "       └─ $enabled_count 개 서비스 저장됨"
+    echo -e "       └─ $enabled_count services saved"
 
-    # 3. 실행 중인 프로세스 (이름만)
-    echo -e "${BLUE}[INFO]${NC} 실행 중인 프로세스 목록 수집..."
+    # 3. Running processes (names only)
+    echo -e "${BLUE}[INFO]${NC} Collecting running process list..."
     get_running_processes > "$SNAPSHOT_DIR/processes.txt"
     proc_count=$(wc -l < "$SNAPSHOT_DIR/processes.txt")
-    echo -e "       └─ $proc_count 개 프로세스 저장됨"
+    echo -e "       └─ $proc_count processes saved"
 
-    # 4. 상세 프로세스 정보
-    echo -e "${BLUE}[INFO]${NC} 상세 프로세스 정보 수집..."
+    # 4. Detailed process information
+    echo -e "${BLUE}[INFO]${NC} Collecting detailed process information..."
     get_process_details > "$SNAPSHOT_DIR/processes_detail.txt"
 
-    # 5. 리스닝 포트
-    echo -e "${BLUE}[INFO]${NC} 리스닝 포트 수집..."
+    # 5. Listening ports
+    echo -e "${BLUE}[INFO]${NC} Collecting listening ports..."
     get_listening_ports > "$SNAPSHOT_DIR/ports.txt"
     port_count=$(grep -c "LISTEN\|tcp\|udp" "$SNAPSHOT_DIR/ports.txt" 2>/dev/null || echo "0")
-    echo -e "       └─ $port_count 개 포트 저장됨"
+    echo -e "       └─ $port_count ports saved"
 
-    # 메타데이터 저장
+    # Save metadata
     cat > "$SNAPSHOT_DIR/metadata.txt" << EOF
-호스트명: $HOSTNAME
-스냅샷 시간: $(date '+%Y-%m-%d %H:%M:%S')
-커널 버전: $(uname -r)
-업타임: $(uptime -p 2>/dev/null || uptime)
+Hostname: $HOSTNAME
+Snapshot Time: $(date '+%Y-%m-%d %H:%M:%S')
+Kernel Version: $(uname -r)
+Uptime: $(uptime -p 2>/dev/null || uptime)
 EOF
 
     echo ""
-    echo -e "${GREEN}[SUCCESS]${NC} 스냅샷 저장 완료!"
-    echo -e "          저장 위치: $SNAPSHOT_DIR"
+    echo -e "${GREEN}[SUCCESS]${NC} Snapshot saved successfully!"
+    echo -e "          Saved at: $SNAPSHOT_DIR"
     echo ""
-    echo -e "${YELLOW}[NOTE]${NC} 재부팅 후 다음 명령어로 비교하세요:"
+    echo -e "${YELLOW}[NOTE]${NC} After reboot, compare with this command:"
     echo -e "       $0 compare"
 }
 
-# API로 결과 전송
+# Send results to API
 send_to_api() {
     local json_data="$1"
     local api_url="$2"
@@ -175,7 +175,7 @@ send_to_api() {
     local response
     local http_code
     
-    # curl로 POST 요청
+    # POST request with curl
     response=$(curl -s -w "\n%{http_code}" -X POST "$api_url" \
         -H "Content-Type: application/json" \
         -d "$json_data" 2>&1)
@@ -183,15 +183,15 @@ send_to_api() {
     http_code=$(echo "$response" | tail -n1)
     
     if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
-        echo "[API] 결과 전송 성공: $api_url (HTTP $http_code)" >&2
+        echo "[API] Result transmission successful: $api_url (HTTP $http_code)" >&2
         return 0
     else
-        echo "[API] 결과 전송 실패: $api_url (HTTP $http_code)" >&2
+        echo "[API] Result transmission failed: $api_url (HTTP $http_code)" >&2
         return 1
     fi
 }
 
-# JSON 배열 생성 함수
+# JSON array creation function
 array_to_json() {
     local items="$1"
     if [[ -z "$items" ]]; then
@@ -213,10 +213,10 @@ array_to_json() {
     echo "    ]"
 }
 
-# 스냅샷과 현재 상태 비교 (JSON 모드)
+# Compare snapshot with current state (JSON mode)
 do_compare_json() {
     if [[ ! -f "$SNAPSHOT_DIR/services_running.txt" ]]; then
-        echo '{"error": "스냅샷이 없습니다. 먼저 snapshot 명령을 실행하세요.", "status": "error"}'
+        echo '{"error": "No snapshot found. Please run snapshot command first.", "status": "error"}'
         exit 1
     fi
 
@@ -229,22 +229,22 @@ do_compare_json() {
     get_running_processes > "$current_procs"
     get_listening_ports > "$current_ports"
 
-    # 중지된 서비스
+    # Stopped services
     local stopped_services=$(comm -23 "$SNAPSHOT_DIR/services_running.txt" "$current_services")
     if [[ -n "$stopped_services" ]]; then
         has_issue=1
     fi
 
-    # 새로 시작된 서비스
+    # Newly started services
     local new_services=$(comm -13 "$SNAPSHOT_DIR/services_running.txt" "$current_services")
 
-    # 중지된 프로세스
+    # Stopped processes
     local stopped_procs=$(comm -23 "$SNAPSHOT_DIR/processes.txt" "$current_procs" | grep -Ev "^($EXCLUDE_PROCS)" || true)
     if [[ -n "$stopped_procs" ]]; then
         has_issue=1
     fi
 
-    # 포트 비교
+    # Port comparison
     local old_ports=$(grep -oE ':[0-9]+' "$SNAPSHOT_DIR/ports.txt" 2>/dev/null | sort -u || true)
     local new_ports=$(grep -oE ':[0-9]+' "$current_ports" 2>/dev/null | sort -u || true)
     local missing_ports=$(comm -23 <(echo "$old_ports") <(echo "$new_ports") 2>/dev/null || true)
@@ -252,7 +252,7 @@ do_compare_json() {
         has_issue=1
     fi
 
-    # JSON 생성
+    # Generate JSON
     local json_output
     json_output=$(cat << EOF
 {
@@ -260,7 +260,7 @@ do_compare_json() {
   "timestamp": "$(date '+%Y-%m-%d %H:%M:%S')",
   "status": "$([ $has_issue -eq 0 ] && echo "success" || echo "failure")",
   "has_issues": $([ $has_issue -eq 1 ] && echo "true" || echo "false"),
-  "snapshot_time": "$(grep '스냅샷 시간:' "$SNAPSHOT_DIR/metadata.txt" 2>/dev/null | cut -d: -f2- | xargs || echo "unknown")",
+  "snapshot_time": "$(grep 'Snapshot Time:' "$SNAPSHOT_DIR/metadata.txt" 2>/dev/null | cut -d: -f2- | xargs || echo "unknown")",
   "services": {
     "stopped": $(array_to_json "$stopped_services"),
     "new": $(array_to_json "$new_services")
@@ -275,10 +275,10 @@ do_compare_json() {
 EOF
 )
 
-    # JSON 출력
+    # JSON output
     echo "$json_output"
     
-    # API로 전송 (옵션)
+    # Send to API (optional)
     if [[ -n "$API_URL" ]]; then
         send_to_api "$json_output" "$API_URL"
     fi
@@ -292,7 +292,7 @@ EOF
     fi
 }
 
-# 스냅샷과 현재 상태 비교 (일반 모드)
+# Compare snapshot with current state (normal mode)
 do_compare() {
     if [[ "$JSON_MODE" == "true" ]]; then
         do_compare_json
@@ -300,51 +300,51 @@ do_compare() {
     fi
 
     if [[ ! -f "$SNAPSHOT_DIR/services_running.txt" ]]; then
-        echo -e "${RED}[ERROR]${NC} 스냅샷이 없습니다. 먼저 'snapshot' 명령을 실행하세요."
+        echo -e "${RED}[ERROR]${NC} No snapshot found. Please run 'snapshot' command first."
         exit 1
     fi
 
     echo -e "${BLUE}${LINE}${NC}"
-    echo -e "${BLUE}  서버 재부팅 후 프로세스 비교 리포트${NC}"
-    echo -e "${BLUE}  호스트: $HOSTNAME${NC}"
-    echo -e "${BLUE}  비교 시간: $(date '+%Y-%m-%d %H:%M:%S')${NC}"
+    echo -e "${BLUE}  Process Comparison Report After Server Reboot${NC}"
+    echo -e "${BLUE}  Host: $HOSTNAME${NC}"
+    echo -e "${BLUE}  Comparison Time: $(date '+%Y-%m-%d %H:%M:%S')${NC}"
     echo -e "${BLUE}${LINE}${NC}"
     echo ""
 
-    # 스냅샷 메타데이터 출력
+    # Output snapshot metadata
     if [[ -f "$SNAPSHOT_DIR/metadata.txt" ]]; then
-        echo -e "${YELLOW}[스냅샷 정보]${NC}"
+        echo -e "${YELLOW}[Snapshot Information]${NC}"
         cat "$SNAPSHOT_DIR/metadata.txt"
         echo ""
     fi
 
     local has_issue=0
 
-    # 1. systemd 서비스 비교
-    echo -e "${YELLOW}[1] Systemd 서비스 비교${NC}"
+    # 1. Compare systemd services
+    echo -e "${YELLOW}[1] Systemd Service Comparison${NC}"
     echo -e "${THIN_LINE}"
 
     current_services=$(mktemp)
     get_systemd_services > "$current_services"
 
-    # 중지된 서비스 찾기
+    # Find stopped services
     stopped_services=$(comm -23 "$SNAPSHOT_DIR/services_running.txt" "$current_services")
     if [[ -n "$stopped_services" ]]; then
-        echo -e "${RED}[!] 실행되지 않는 서비스:${NC}"
+        echo -e "${RED}[!] Services not running:${NC}"
         while IFS= read -r svc; do
             status=$(systemctl is-active "$svc" 2>/dev/null || true)
             [[ -z "$status" ]] && status="unknown"
-            echo -e "    ${RED}✗${NC} $svc (상태: $status)"
+            echo -e "    ${RED}✗${NC} $svc (status: $status)"
         done <<< "$stopped_services"
         has_issue=1
     else
-        echo -e "${GREEN}[✓] 모든 서비스가 정상 실행 중${NC}"
+        echo -e "${GREEN}[✓] All services running normally${NC}"
     fi
 
-    # 새로 시작된 서비스
+    # Newly started services
     new_services=$(comm -13 "$SNAPSHOT_DIR/services_running.txt" "$current_services")
     if [[ -n "$new_services" ]]; then
-        echo -e "${BLUE}[i] 새로 시작된 서비스:${NC}"
+        echo -e "${BLUE}[i] Newly started services:${NC}"
         while IFS= read -r svc; do
             echo -e "    ${BLUE}+${NC} $svc"
         done <<< "$new_services"
@@ -353,95 +353,95 @@ do_compare() {
     rm -f "$current_services"
     echo ""
 
-    # 2. 프로세스 비교
-    echo -e "${YELLOW}[2] 프로세스 비교${NC}"
+    # 2. Compare processes
+    echo -e "${YELLOW}[2] Process Comparison${NC}"
     echo -e "${THIN_LINE}"
 
     current_procs=$(mktemp)
     get_running_processes > "$current_procs"
 
-    # 중지된 프로세스 찾기
+    # Find stopped processes
     stopped_procs=$(comm -23 "$SNAPSHOT_DIR/processes.txt" "$current_procs" | grep -Ev "^($EXCLUDE_PROCS)" || true)
     if [[ -n "$stopped_procs" ]]; then
-        echo -e "${RED}[!] 실행되지 않는 프로세스:${NC}"
+        echo -e "${RED}[!] Processes not running:${NC}"
         while IFS= read -r proc; do
             echo -e "    ${RED}✗${NC} $proc"
         done <<< "$stopped_procs"
         has_issue=1
     else
-        echo -e "${GREEN}[✓] 주요 프로세스 모두 실행 중${NC}"
+        echo -e "${GREEN}[✓] All major processes running${NC}"
     fi
 
     rm -f "$current_procs"
     echo ""
 
-    # 3. 포트 비교
-    echo -e "${YELLOW}[3] 리스닝 포트 비교${NC}"
+    # 3. Compare ports
+    echo -e "${YELLOW}[3] Listening Port Comparison${NC}"
     echo -e "${THIN_LINE}"
 
     if [[ -f "$SNAPSHOT_DIR/ports.txt" ]]; then
         current_ports=$(mktemp)
         get_listening_ports > "$current_ports"
 
-        # 간단한 포트 비교
+        # Simple port comparison
         old_ports=$(grep -oE ':[0-9]+' "$SNAPSHOT_DIR/ports.txt" 2>/dev/null | sort -u || true)
         new_ports=$(grep -oE ':[0-9]+' "$current_ports" 2>/dev/null | sort -u || true)
 
         missing_ports=$(comm -23 <(echo "$old_ports") <(echo "$new_ports") 2>/dev/null || true)
         if [[ -n "$missing_ports" ]]; then
-            echo -e "${RED}[!] 리스닝하지 않는 포트:${NC}"
+            echo -e "${RED}[!] Ports not listening:${NC}"
             echo "$missing_ports" | while read -r port; do
                 echo -e "    ${RED}✗${NC} $port"
             done
             has_issue=1
         else
-            echo -e "${GREEN}[✓] 모든 포트 정상 리스닝 중${NC}"
+            echo -e "${GREEN}[✓] All ports listening normally${NC}"
         fi
 
         rm -f "$current_ports"
     fi
     echo ""
 
-    # 결과 요약
+    # Result summary
     echo -e "${YELLOW}${LINE}${NC}"
     if [[ $has_issue -eq 1 ]]; then
-        echo -e "${RED}[결과] 일부 서비스/프로세스가 실행되지 않고 있습니다!${NC}"
-        echo -e "${YELLOW}       위 목록을 확인하고 필요시 수동으로 시작하세요.${NC}"
+        echo -e "${RED}[Result] Some services/processes are not running!${NC}"
+        echo -e "${YELLOW}       Please check the list above and manually start if needed.${NC}"
         exit 1
     else
-        echo -e "${GREEN}[결과] 모든 서비스와 프로세스가 정상입니다!${NC}"
+        echo -e "${GREEN}[Result] All services and processes are normal!${NC}"
         exit 0
     fi
 }
 
-# 스냅샷 상태 확인
+# Check snapshot status
 do_status() {
     if [[ "$JSON_MODE" == "true" ]]; then
         if [[ -d "$SNAPSHOT_DIR" && -f "$SNAPSHOT_DIR/metadata.txt" ]]; then
             echo '{"status": "exists", "location": "'"$SNAPSHOT_DIR"'"}'
         else
-            echo '{"status": "not_found", "message": "스냅샷이 없습니다"}'
+            echo '{"status": "not_found", "message": "No snapshot found"}'
         fi
         return
     fi
 
-    echo -e "${BLUE}[스냅샷 상태]${NC}"
+    echo -e "${BLUE}[Snapshot Status]${NC}"
     echo -e "${THIN_LINE}"
 
     if [[ -d "$SNAPSHOT_DIR" && -f "$SNAPSHOT_DIR/metadata.txt" ]]; then
-        echo -e "${GREEN}스냅샷 존재함${NC}"
+        echo -e "${GREEN}Snapshot exists${NC}"
         echo ""
         cat "$SNAPSHOT_DIR/metadata.txt"
         echo ""
-        echo "저장된 파일:"
-        ls -la "$SNAPSHOT_DIR"/*.txt 2>/dev/null || echo "  (없음)"
+        echo "Saved files:"
+        ls -la "$SNAPSHOT_DIR"/*.txt 2>/dev/null || echo "  (none)"
     else
-        echo -e "${YELLOW}스냅샷 없음${NC}"
-        echo "먼저 '$0 snapshot' 명령을 실행하세요."
+        echo -e "${YELLOW}No snapshot${NC}"
+        echo "Please run '$0 snapshot' command first."
     fi
 }
 
-# 메인 로직 - 파라미터 파싱
+# Main logic - Parameter parsing
 COMMAND="${1:-}"
 shift || true
 

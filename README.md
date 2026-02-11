@@ -1,22 +1,22 @@
-# 더 나은 삶을 위한 딸깍 스크립트 저장소 🚀
+# Scripts Repository for Better Life 🚀
 
-업무를 편하게, 삶을 더 나아지게 만드는 유용한 스크립트들을 모아놓은 저장소입니다.
+A collection of useful scripts that make work easier and life better.
 
-## 📁 프로젝트 구조
+## 📁 Project Structure
 
 ### process_monitor
-서버 재부팅 전후 프로세스 모니터링 스크립트
-- 재부팅 전 시스템 상태 스냅샷
-- 재부팅 후 변경사항 자동 비교
-- 중단된 서비스/프로세스 즉시 확인
+Server process monitoring scripts for before/after reboot
+- System state snapshot before reboot
+- Automatic comparison after reboot
+- Immediate detection of stopped services/processes
 
-## 🎯 사용 목적
+## 🎯 Purpose
 
-반복적인 작업을 자동화하고, 시스템 관리를 더 쉽고 안전하게 만듭니다.
+Automate repetitive tasks and make system management easier and safer.
 
-## 📝 라이선스
+## 📝 License
 
 MIT License
 
 ---
-*"딸깍 한 번으로 더 나은 내일을"*
+*"One click for a better tomorrow"*
