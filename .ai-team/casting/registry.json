@@ -1,0 +1,46 @@
+{
+  "agents": {
+    "suho": {
+      "persistent_name": "Suho",
+      "universe": "Custom",
+      "created_at": "2026-02-12T00:00:00Z",
+      "legacy_named": true,
+      "status": "active"
+    },
+    "mi": {
+      "persistent_name": "Mi",
+      "universe": "Custom",
+      "created_at": "2026-02-12T00:00:00Z",
+      "legacy_named": true,
+      "status": "active"
+    },
+    "jisoo": {
+      "persistent_name": "Jisoo",
+      "universe": "Custom",
+      "created_at": "2026-02-12T00:00:00Z",
+      "legacy_named": true,
+      "status": "active"
+    },
+    "jennie": {
+      "persistent_name": "Jennie",
+      "universe": "Custom",
+      "created_at": "2026-02-12T00:00:00Z",
+      "legacy_named": true,
+      "status": "active"
+    },
+    "rose": {
+      "persistent_name": "Rosé",
+      "universe": "Custom",
+      "created_at": "2026-02-12T00:00:00Z",
+      "legacy_named": true,
+      "status": "active"
+    },
+    "lisa": {
+      "persistent_name": "Lisa",
+      "universe": "Custom",
+      "created_at": "2026-02-12T00:00:00Z",
+      "legacy_named": true,
+      "status": "active"
+    }
+  }
+}
