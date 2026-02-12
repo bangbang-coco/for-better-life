@@ -29,4 +29,6 @@
 
 ## Learnings
 
+📌 Team update (2026-02-12): Repository integration strategy for process_monitor — Python Package approach recommended for deployment flexibility and version management — decided by Suho
+
 _(This section will grow as I work on the project)_

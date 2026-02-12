@@ -22,4 +22,18 @@
 
 ## Learnings
 
-_(This section will grow as I work on the project)_
+### Module Structure and Dependencies
+- process_monitor is a self-contained, low-dependency module
+- Only uses Python standard library (no external dependencies)
+- Components: Bash scripts (monitor_standalone.sh, monitor_salt.sh), Python API server, Docker configuration, Salt State examples
+- Located at: `/Users/hyomin/git/bangco/for-better-life/process_monitor/`
+
+### Architecture Patterns for Module Integration
+- Evaluated 5 approaches: Git Submodule, Git Subtree, Direct Copy, Python Package, Monorepo
+- For independent, reusable tools with low coupling → Package approach provides best maintainability
+- Python packages integrate naturally with Salt Stack (both Python-based)
+- Version management via semantic versioning enables stable deployments across multiple projects
+
+### User Preferences
+- User prefers Korean language for communication
+- Working on server infrastructure automation (Salt Stack environment)
